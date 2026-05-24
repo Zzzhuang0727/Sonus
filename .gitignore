@@ -1,0 +1,17 @@
+node_modules
+.pnpm-store
+dist
+.env
+.DS_Store
+coverage
+cache/tts/*.mp3
+state.db
+state.db-*
+state.db.json.bak
+user/*.md
+user/playlists.json
+user/users.db*
+user/preferences/*.json
+apps/web/.vite
+apps/web/dist
+apps/server/dist
