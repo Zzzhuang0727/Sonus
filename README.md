@@ -1,3 +1,7 @@
+<p align="right">
+  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
 # Sonus
 
 Sonus is a local-first AI DJ and personal radio host. It gives you a browser/PWA radio console where you can ask for a mood, receive five song choices, pick one to play, and let Sonus learn from the songs you select.
