@@ -1,26 +1,44 @@
 # Sonus Agent Handoff
 
-Read this file first when continuing Sonus in a new conversation. It captures the current project state, design direction, run commands, and recent user preferences so another agent can resume without the prior chat history.
+Read this file first when continuing Sonus in a new conversation. It is the working handoff for the current repo state, product rules, local data model, run commands, and known caveats.
 
-## Project Goal
+## Repository
+
+- Local path: `/Users/zhuang/Projects/VibeCodingProjects/Sonus`
+- GitHub repo: `git@github.com:Zzzhuang0727/Sonus.git`
+- Main branch: `main`
+- Do not commit `.env`, local SQLite databases, generated TTS audio, or per-user preference files.
+
+## Product Goal
 
 Sonus is a local-first personal AI DJ / AI radio host.
 
-MVP shape:
+Core loop:
 
-- `apps/web`: React + Vite PWA player on `localhost:3000`.
-- `apps/server`: Fastify + TypeScript local server on `localhost:8787`.
-- `packages/shared`: shared Zod schemas and TypeScript types.
-- `user`: user taste/profile files.
-- `prompts`: Sonus persona prompt.
+1. User opens the browser/PWA radio console.
+2. User logs in or registers a local Sonus user.
+3. User asks for a mood or recommendation.
+4. Sonus replies in English and returns exactly 5 song choices.
+5. UI shows the choices as cards under the Sonus chat bubble, plus a sixth "None of these" reroll card.
+6. User selects one card to play.
+7. Server records that selected song and artist in the current user's local preference file.
+8. Future recommendations use the registration profile plus recent selections.
 
-Core product loop:
+Important music rule: Sonus should recommend only English-language songs or non-Chinese international instrumental music. Sonus host replies should be in English.
 
-1. User chats with Sonus in the PWA.
-2. Server builds context from user files, state, weather/calendar hooks, and recent playback.
-3. Brain returns strict JSON with `say`, `queue`, `reason`, and `segue`.
-4. Server resolves music, synthesizes DJ speech, persists state, and pushes updates by SSE.
-5. PWA displays and plays the queue.
+## Architecture
+
+```text
+apps/web        React + Vite PWA player on localhost:3000
+apps/server     Fastify + TypeScript local server on localhost:8787
+packages/shared Shared Zod schemas and TypeScript API types
+prompts         Sonus persona prompt
+cache/tts       Generated TTS cache, ignored by git
+user            Local-only user DB and per-user preference files, ignored by git
+state.db        Local playback/chat state SQLite DB, ignored by git
+```
+
+The frontend talks to the server with relative `/api/*` requests and `credentials: "include"` so the local user session cookie works.
 
 ## Run Commands
 
@@ -40,198 +58,255 @@ http://localhost:3000
 Useful checks:
 
 ```bash
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+```
+
+Targeted checks:
+
+```bash
 corepack pnpm --filter @sonus/web typecheck
 corepack pnpm --filter @sonus/web build
 corepack pnpm --filter @sonus/server typecheck
-corepack pnpm test
+corepack pnpm --filter @sonus/server test
+corepack pnpm --filter @sonus/server diagnose:fish
 ```
 
-The user has been viewing the app in the Codex in-app browser at `http://localhost:3000/`.
+The user usually verifies UI in the Codex in-app browser at `http://localhost:3000/`, often around a 556-657 px wide by 896 px tall viewport.
 
 ## Environment
 
-The app can run in mock mode. Real integrations use these environment variables:
+Root `.env` is loaded by `apps/server/src/config/env.ts`.
 
-- `DEEPSEEK_API_KEY`
-- `DEEPSEEK_BASE_URL`
-- `DEEPSEEK_MODEL`
-- `DEEPSEEK_THINKING`
-- `DEEPSEEK_REASONING_EFFORT`
-- `FISH_API_KEY`
-- `FISH_VOICE_ID`
-- `NETEASE_COOKIE`
-- `ICS_URL`
-- `ICS_FILE`
-- `OPENWEATHER_API_KEY`
-- `SONUS_MOCK_AI`
-- `SONUS_MOCK_MUSIC`
-- `SONUS_MOCK_TTS`
-
-Do not bypass music service copyright/access limits. If a playback URL is unavailable, the expected behavior is to skip/fallback and explain.
-
-## Current Frontend Direction
-
-The user wants the UI to resemble the provided reference images:
-
-- Pixel-tech style.
-- Minimal, dark, card/panel layout.
-- Pixel fonts / pixel-like lettering.
-- Dotted pixel-grid backgrounds inside each panel.
-- Overall page background is a purple animated gradient.
-- Avoid oversized marketing/landing-page styling. The first screen should be the actual player.
-
-Important current UI behavior:
-
-- Top brand uses a custom pixel-rendered `SONUS` word. The user asked for the Sonus text to be smaller.
-- Top-left avatar image and topbar `ON AIR` line were removed per user feedback.
-- Theme switch has `LOGIN`, `DARK`, `LIGHT`; `DARK`/`LIGHT` should actually toggle theme.
-- Clock deck time must be real-time, not static.
-- Hero waveform at the bottom of the clock deck should be animated, thin, and visually move right-to-left: bars enter from the right and exit on the left.
-- Mini meter icon in the transport deck should animate.
-- Queue is collapsible, default collapsed. Clicking the `QUEUE / N TRACKS` header expands/collapses the rows.
-- Queue header must stay dark, including in light mode. It should not become a pale blue/light strip.
-- Transport controls are now wired to the audio element: play, pause, stop/reset, previous, next, volume stepping, real time, duration, seek.
-- If a `speechUrl` exists, Sonus can play the host speech first, then continue into the first queued track.
-- Lyrics are shown in the host/message area from `track.lyric`.
-- `TASTE FILES` now exposes `taste.md`, `routines.md`, `mood-rules.md`, and editable `playlists.json`.
-- PWA has a production-only service worker at `apps/web/public/sw.js`; development unregisters service workers to avoid stale module caching.
-
-## Key Frontend Files
-
-- `apps/web/src/App.tsx`: main React app and UI state.
-- `apps/web/src/styles.css`: all current visual styling and animations.
-- `apps/web/src/api.ts`: browser API client.
-- `apps/web/public/manifest.webmanifest`: PWA manifest.
-
-Current notable React state in `App.tsx`:
-
-- `theme`: `"dark" | "light"`, persisted to `localStorage` and `document.documentElement.dataset.theme`.
-- `currentTime`: updated every second for the live clock.
-- `queueExpanded`: controls the collapsible queue; default is `false`.
-- `playbackPhase`, `trackTime`, `trackDuration`, `volume`: drive the real transport controls.
-
-Current notable CSS areas in `styles.css`:
-
-- `body` / `pageGradientDrift`: animated purple page background.
-- `.topbar`, `.clockDeck`, `.transportDeck`, `.queueDeck`, `.messageDeck`, `.commandDock`: panel dot-grid backgrounds.
-- `.pixelDigit`, `.pixelLetter`: custom pixel clock/brand rendering.
-- `.waveTrack`, `.waveform`: animated right-to-left waveform.
-- `.meterMini span`: animated transport meter.
-- `.queueToggle`: dark collapsible queue header.
-- `.rail input`: custom range-based seek bar.
-- `.lyricsPanel`: lyric display.
-
-## Server / Shared Files
-
-- `packages/shared/src/index.ts`: `Track`, `QueueItem`, `DJTurn`, `SonusPlan`, `TasteProfile`, `NowState` and Zod schemas.
-- `apps/server/src/router/api.ts`: HTTP API routes.
-- `apps/server/src/router/events.ts`: SSE events.
-- `apps/server/src/context/context.ts`: prompt/context assembly.
-- `apps/server/src/brain/openai.ts`: DeepSeek V4 Pro brain adapter. The filename is historical.
-- `apps/server/src/music/netease.ts`: Netease adapter.
-- `apps/server/src/music/mock.ts`: mock music fallback.
-- `apps/server/src/tts/fish.ts`: Fish Audio TTS + cache.
-- `apps/server/src/state/store.ts`: SQLite-backed persisted state using Node `node:sqlite`.
-
-## User Profile Files
-
-These files define Sonus's user memory/personality context:
-
-- `user/taste.md`
-- `user/routines.md`
-- `user/playlists.json`
-- `user/mood-rules.md`
-- `prompts/sonus-persona.md`
-
-Default host style is soft late-night English radio / "gentle night flight". Sonus should reply in English only and recommend only English-language songs or non-Chinese international instrumental music.
-
-## Public API
-
-- `POST /api/chat`
-- `GET /api/now`
-- `GET /api/stream`
-- `GET /api/taste`
-- `PUT /api/taste`
-- `POST /api/plan/today`
-
-## Recent User Feedback To Preserve
-
-The user has been doing visual QA through browser comments. Preserve these decisions:
-
-- Mode switch sizing/format should feel coordinated and compact.
-- `Sonus` should use pixel-style typography and be smaller than the earlier version.
-- Clock must show real current time.
-- Clock deck bottom waveform should be dynamic.
-- Transport left meter icon should be dynamic.
-- Transport section should use a technology-style font.
-- Top-left avatar image should be removed.
-- Topbar `ON AIR` should be removed.
-- Pixel blocks in the clock/brand should be finer/smaller.
-- Each panel should have an internal pixel-dot background.
-- Overall page background should be purple animated gradient.
-- Queue's purpose is playback order; it is now collapsible and default collapsed.
-- Queue header color should be dark, not light.
-
-## Verification Workflow
-
-After frontend changes:
-
-1. Run:
-
-   ```bash
-   corepack pnpm --filter @sonus/web typecheck
-   corepack pnpm --filter @sonus/web build
-   ```
-
-2. Refresh `http://localhost:3000/` in the in-app browser.
-3. Check at mobile-ish viewport because the user screenshots are around 556-599 px wide by 896 px tall.
-4. Verify no text overlaps, especially:
-   - topbar brand and mode switch
-   - clock deck
-   - transport title row
-   - queue header
-   - command dock
-
-After server/shared changes:
-
-```bash
-corepack pnpm --filter @sonus/server typecheck
-corepack pnpm test
+```env
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_THINKING=disabled
+DEEPSEEK_REASONING_EFFORT=high
+FISH_API_KEY=
+FISH_BASE_URL=https://api.fish.audio
+FISH_VOICE_ID=
+NETEASE_BASE_URL=https://music.163.com
+NETEASE_COOKIE=
+ICS_URL=
+ICS_FILE=
+OPENWEATHER_API_KEY=
+OPENWEATHER_LOCATION=Shanghai,CN
+SONUS_PORT=8787
+SONUS_WEB_ORIGIN=http://localhost:3000
+SONUS_MOCK_AI=true
+SONUS_MOCK_MUSIC=true
+SONUS_MOCK_TTS=true
 ```
 
-## Editing Guidelines For Future Agents
+Notes:
+
+- User has said `DEEPSEEK_API_KEY`, `FISH_API_KEY`, `FISH_VOICE_ID`, and `NETEASE_COOKIE` are configured in local `.env`.
+- Model should be `deepseek-v4-pro`.
+- `FISH_VOICE_ID` corresponds to the Fish Audio voice/reference id.
+- Fish Audio direct network access has timed out before on this machine. TTS must fail open: return DJ text and queue even when speech audio is unavailable.
+- Netease real playback URL retrieval works with cookie in principle, but account/rights restrictions can still return unavailable URLs. Do not bypass restrictions; fallback or skip clearly.
+- Mock flags can be used for UI work without external services.
+
+## Git Ignore / Local Data
+
+Keep these local only:
+
+```text
+.env
+state.db*
+state.db.json.bak
+user/users.db*
+user/preferences/*.json
+user/*.md
+user/playlists.json
+cache/tts/*.mp3
+node_modules
+apps/*/dist
+```
+
+Before commits, check:
+
+```bash
+git status --short
+git check-ignore -v .env state.db user/users.db user/preferences/example.json cache/tts/test.mp3
+```
+
+## Frontend State
+
+Main files:
+
+- `apps/web/src/App.tsx`
+- `apps/web/src/styles.css`
+- `apps/web/src/api.ts`
+- `apps/web/public/manifest.webmanifest`
+- `apps/web/public/sw.js`
+
+Current implemented UI:
+
+- Pixel-tech radio layout with internal dot-grid panel backgrounds.
+- Overall page background is a purple animated gradient.
+- Top brand uses custom pixel-rendered `SONUS`; previous avatar and topbar `ON AIR` were removed.
+- Top right has `LOGIN`, `DARK`, `LIGHT`.
+- `LOGIN` opens a liquid-glass auth modal.
+- `DARK` / `LIGHT` switch theme and persist it.
+- Clock deck shows real current time and date.
+- Hero waveform is animated, thin, and visually moves right-to-left.
+- Transport deck has animated mini meter.
+- Play/pause is a single toggle button. Pause then play should resume the same audio.
+- Stop resets playback.
+- Previous/next, volume stepping, progress seek, current time, and duration are wired.
+- Queue is collapsible, default collapsed. Clicking the dark `QUEUE / N TRACKS` strip toggles it.
+- Chat area uses history records and liquid-glass chat bubbles with avatars.
+- Sonus and user messages are shown as separate bubbles.
+- Clear chat button calls `DELETE /api/history`.
+- Command dock floats at the bottom of the chat panel, uses one-line mood input + autosizing textarea + send button.
+- The message textarea clears after successful send, grows vertically up to a capped height, then scrolls.
+- Song recommendations render as 2 rows x 3 cards: five track cards and one reroll card.
+- Recommendation cards must avoid clipping long song/artist text.
+- `Now playing` / errors should stay close to the command dock; avoid large empty gaps.
+- Lyrics are hidden by default and opened with a lyrics button. They appear in a modal/window, not a collapsible section.
+- Lyrics parse timestamped LRC when available, scroll with playback time, highlight and enlarge the current line.
+- Right side panel includes `TODAY PLAN` and `RECENT 20`; old `TASTE FILES` UI was replaced by recent selected songs.
+
+Important visual preferences from the user:
+
+- Similar to the provided Claudio reference: pixel-tech, minimal, card/panel layout.
+- Pixel font / pixel-like lettering.
+- Purple tone and liquid-glass chat/input surfaces.
+- Increase liquid glass transparency when requested.
+- Keep queue header dark even in light mode.
+- Avoid text overlap; mobile-ish viewport is important.
+
+## Backend State
+
+Main files:
+
+- `packages/shared/src/index.ts`: shared schemas/types.
+- `apps/server/src/router/api.ts`: HTTP API routes.
+- `apps/server/src/router/events.ts`: SSE.
+- `apps/server/src/context/context.ts`: prompt/context assembly.
+- `apps/server/src/brain/openai.ts`: DeepSeek brain adapter, historical filename.
+- `apps/server/src/brain/schema.ts`: model output schema.
+- `apps/server/src/music/netease.ts`: Netease search/lyric/playback adapter.
+- `apps/server/src/music/mock.ts`: fallback mock tracks.
+- `apps/server/src/tts/fish.ts`: Fish Audio TTS + cache.
+- `apps/server/src/state/store.ts`: playback/chat/plan SQLite state.
+- `apps/server/src/users/store.ts`: local user SQLite store and preference files.
+- `apps/server/src/config/env.ts`: `.env` and local paths.
+
+Current implemented API:
+
+```text
+GET    /health
+GET    /api/now
+GET    /api/history
+DELETE /api/history
+GET    /api/stream
+POST   /api/chat
+POST   /api/play/:id
+POST   /api/plan/today
+GET    /api/taste
+PUT    /api/taste
+POST   /api/users/register
+POST   /api/users/login
+GET    /api/users/me
+GET    /api/users/preferences
+POST   /api/users/logout
+```
+
+Current auth/user model:
+
+- Local SQLite DB: `user/users.db`.
+- Session cookie name: `sonus_user_id`.
+- Registration required fields: `username`, `phone`, `email`.
+- Optional fields: `name`, `age`, `birthMonthDay`, `preferredGenres`, `preferredArtists`.
+- `birthMonthDay` format is `MM-DD`, for example `07-27`.
+- Login uses one identity field, matching username OR phone OR email.
+- Registration profile is stored only on the local machine.
+
+Current preference model:
+
+- Per-user file: `user/preferences/<userId>.json`.
+- When user selects a recommendation card and `/api/play/:id` succeeds, `userStore.recordSelection` records the current track.
+- Preference file keeps the latest 100 unique selected songs.
+- Preference file drops choices older than 30 days.
+- `/api/users/preferences` returns the latest 20 choices for the UI.
+- `userStore.buildUserProfileContext` injects registration preferences and recent selections into the AI prompt.
+- Legacy markdown taste files are no longer the primary learning system, though `/api/taste` still returns a generated compatibility profile.
+
+Current brain behavior:
+
+- Uses DeepSeek Chat Completions style request through `apps/server/src/brain/openai.ts`.
+- Output is parsed into strict JSON with `say`, `reason`, `segue`, `searches`, and `queue`.
+- `queue` must contain exactly 5 track choices.
+- Hard prompt rule: reply in English only; recommend only English-language songs or non-Chinese international instrumental music; avoid Chinese-language songs and tracks whose title or artist is primarily Chinese text.
+- Server also sanitizes model copy and filters/sanitizes music queries.
+
+## Tests
+
+Known tests:
+
+- `packages/shared/src/index.test.ts`
+- `apps/server/test/context.test.ts`
+- `apps/server/test/state-store.test.ts`
+- `apps/server/test/user-store.test.ts`
+- `apps/server/src/tts/fish.test.ts`
+- `apps/web/src/App.test.ts`
+
+After doc-only edits, tests are not required. After code edits:
+
+- Frontend only: run web typecheck/build.
+- Server/shared changes: run root `corepack pnpm typecheck` and `corepack pnpm test`.
+- If touching UI behavior, use the in-app browser to verify `http://localhost:3000/`.
+
+## Browser Verification Checklist
+
+After meaningful frontend changes:
+
+1. Start dev server with `corepack pnpm dev` if not already running.
+2. Open/refresh `http://localhost:3000/` in the Codex in-app browser.
+3. Check narrow desktop/mobile-ish width around 556-657 px.
+4. Verify:
+   - topbar brand and mode switch do not collide
+   - auth modal can register/login/logout
+   - queue default collapsed and dark toggle strip works
+   - play/pause toggles one button and resumes playback
+   - recommendation cards fit long names
+   - command dock clears after send and does not jump upward
+   - textarea wraps/grows then scrolls
+   - lyrics modal opens, closes, scrolls, and highlights current line
+   - chat bubbles and command dock retain purple liquid-glass styling
+
+## Known Caveats
+
+- Fish Audio may time out from this environment; do not block `/api/chat` on TTS failure.
+- Some Netease tracks may not provide playable URLs due to rights/account restrictions.
+- The Netease playback endpoint previously required `ids=[id]`, not `id=id`.
+- `state.db` replaced the earlier JSON state and is real SQLite.
+- `node:sqlite` requires Node 22+.
+- Dev service workers can stale-cache old frontend code; development unregisters service workers in `apps/web/src/main.tsx`.
+- The Git committer on this machine may be auto-configured as local Mac user. Do not amend author unless the user asks.
+
+## Recent Project History
+
+- Project was initialized as a pnpm monorepo and pushed to `Zzzhuang0727/Sonus`.
+- README was written in English, then `README.zh-CN.md` was added with language switch links at the top of both README files.
+- `.env` and local data files are ignored and were not pushed.
+- Frontend was iteratively restyled to pixel-tech purple liquid-glass UI based on user browser comments.
+- Backend was updated from legacy taste markdown learning to local per-user recent-song preference learning.
+- Login/register was added on the frontend and backend.
+
+## Working Style For Future Agents
 
 - Keep changes scoped to the user's requested area.
 - Do not revert unrelated local changes.
-- Use existing patterns before adding new abstractions.
+- Use existing patterns before adding abstractions.
+- Use `rg` for search.
 - Use `apply_patch` for manual edits.
-- Prefer `rg` for file/text search.
-- For UI work, verify in the browser after meaningful visual changes.
-- Keep Sonus as the actual player interface, not a landing page.
-
-## Current Known State
-
-As of the latest handoff:
-
-- Root typecheck passed via `corepack pnpm typecheck`.
-- Root test passed via `corepack pnpm test`.
-- Root production build passed via `corepack pnpm build`.
-- Browser verification confirmed `.queueToggle` has dark background color and dot-grid background.
-- Browser smoke test confirmed default chat generates a 3-track queue, updates current track, shows lyrics, and binds progress max to the real track duration.
-- DeepSeek V4 Pro integration is configured through root `.env` and has been smoke-tested successfully.
-- Netease search and real playback URL retrieval work with `NETEASE_COOKIE`. Important: the playback endpoint requires `ids=[id]`, not `id=id`. If an individual track still has no playable URL because of rights/account limits, the adapter keeps real metadata and falls back to playable demo audio with a clear reason marker.
-- Fish Audio config is present, and the TTS request includes the official `model: s2-pro` header. Direct connection to `api.fish.audio:443` still times out on this machine. TTS now fails open: Sonus returns DJ text and queue even when audio synthesis is unavailable. Use `corepack pnpm --filter @sonus/server diagnose:fish` to re-test, or set `FISH_BASE_URL` to a reachable proxy/endpoint.
-- `state.db` is now a real SQLite database with `state_meta`, `turns`, and `plans` tables. The previous JSON file was migrated and backed up as `state.db.json.bak`.
-- The dev server may already be running from a previous session; if not, start it with `corepack pnpm dev`.
-
-## Remaining Work Requiring User Input
-
-Ask the user for these before real integration testing:
-
-- DeepSeek: `DEEPSEEK_API_KEY`. The default model is `deepseek-v4-pro`.
-- Fish Audio: `FISH_API_KEY` and `FISH_VOICE_ID`.
-- Netease: `NETEASE_COOKIE` if real playback/search needs authenticated access.
-- Weather: `OPENWEATHER_API_KEY` and `OPENWEATHER_LOCATION`.
-- Calendar: `ICS_URL` or `ICS_FILE`.
-
-Without these, keep using mock mode from `.env.example`.
+- Do not write or overwrite files with shell heredocs.
+- Do not commit `.env` or local DB/preference/audio files.
+- For UI work, verify visually in browser before final response.
+- For pushes, use SSH remote `git@github.com:Zzzhuang0727/Sonus.git`; HTTPS failed earlier because GitHub password auth is disabled.
